@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Persona AI Chatbot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-container::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        #chat-container::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+        #chat-container::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        .message-bubble {
+            transition: all 0.3s ease;
+        }
+        .message-bubble.user {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .message-bubble.ai {
+            background-color: #e2e8f0;
+            color: #1e293b;
+        }
+        .loader {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #e2e8f0;
+            border-bottom-color: #3b82f6;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 1s linear infinite;
+        }
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #summary-modal-overlay {
+            transition: opacity 0.3s ease;
+        }
+        #summary-modal-content {
+            transition: transform 0.3s ease;
+        }
+        .api-key-input::placeholder {
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 flex flex-col h-screen antialiased">
+
+    <header class="bg-white shadow-md p-4 z-20">
+        <div class="max-w-4xl mx-auto flex flex-wrap justify-between items-center gap-4">
+            <h1 class="text-2xl font-bold text-slate-800 w-full sm:w-auto">Multi-Persona AI Chatbot</h1>
+            <div class="flex items-center space-x-3">
+                 <button id="summarize-btn" class="text-sm font-medium text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-2 rounded-lg shadow-sm">Summarize</button>
+                <label for="persona-select" class="text-sm font-medium text-slate-600">Persona:</label>
+                <select id="persona-select" class="rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                    <option value="default" selected>Standard AI</option>
+                    <option value="librarian">Helpful Librarian</option>
+                    <option value="shakespeare">Shakespearean Poet</option>
+                    <option value="teenager">Sarcastic Teenager</option>
+                    <option value="stoic">Stoic Philosopher</option>
+                </select>
+            </div>
+            <div class="w-full">
+                 <input type="password" id="api-key-input" placeholder="Enter your Google Gemini API Key here to begin..." class="api-key-input w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none text-sm">
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 flex flex-col max-w-4xl w-full mx-auto p-4 overflow-hidden">
+        <div id="chat-container" class="flex-1 overflow-y-auto p-4 bg-white rounded-lg shadow-inner">
+            <!-- Chat messages will be appended here -->
+            <div class="message-bubble ai max-w-lg mb-4 p-3 rounded-lg">
+                <p class="text-sm">Hello! Please enter your Google Gemini API key above to activate the chat. You can get a free key from Google AI Studio.</p>
+            </div>
+        </div>
+
+        <div id="loading-indicator" class="hidden flex items-center justify-start p-2">
+            <div class="loader"></div>
+            <p class="ml-3 text-sm text-slate-500">Persona is thinking...</p>
+        </div>
+
+        <footer class="mt-4">
+            <div id="suggestion-container" class="flex items-center justify-start space-x-2 mb-2 h-10">
+                <!-- Reply suggestions will be injected here -->
+            </div>
+            <form id="chat-form" class="flex items-center space-x-3">
+                <input type="text" id="chat-input" placeholder="Type your message here..." class="flex-1 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" autocomplete="off" disabled>
+                <button type="submit" class="bg-blue-500 text-white font-semibold px-6 py-3 rounded-lg shadow-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-slate-400 disabled:cursor-not-allowed" disabled>
+                    Send
+                </button>
+            </form>
+        </footer>
+    </main>
+    
+    <!-- Summary Modal -->
+    <div id="summary-modal-overlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 hidden z-30">
+        <div id="summary-modal-content" class="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full transform scale-95">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h2 class="text-xl font-bold text-slate-800">Conversation Summary</h2>
+                <button id="close-modal-btn" class="text-slate-500 hover:text-slate-800">&times;</button>
+            </div>
+            <div id="summary-text" class="text-slate-600 text-sm max-h-96 overflow-y-auto">
+                <!-- Summary will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- DOM Element References ---
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const chatContainer = document.getElementById('chat-container');
+        const personaSelect = document.getElementById('persona-select');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const sendButton = chatForm.querySelector('button');
+        const suggestionContainer = document.getElementById('suggestion-container');
+        const summarizeBtn = document.getElementById('summarize-btn');
+        const summaryModalOverlay = document.getElementById('summary-modal-overlay');
+        const summaryModalContent = document.getElementById('summary-modal-content');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const summaryText = document.getElementById('summary-text');
+        const apiKeyInput = document.getElementById('api-key-input');
+
+        // --- Persona Definitions (Full prompts are included below but truncated for this view) ---
+        const personas = {
+            default: { name: "Standard AI", system_prompt: "You are a helpful and friendly AI assistant. Be concise and accurate." },
+            librarian: { name: "Helpful Librarian", system_prompt: `You are a helpful and patient librarian named Eleanor...` },
+            shakespeare: { name: "Shakespearean Poet", system_prompt: `Thou art a playwright and poet from the Elizabethan era...` },
+            teenager: { name: "Sarcastic Teenager", system_prompt: `You are a sarcastic teenager named Alex...` },
+            stoic: { name: "Stoic Philosopher", system_prompt: `You are a Stoic philosopher...` }
+        };
+        Object.assign(personas.librarian, { system_prompt: `You are a helpful and patient librarian named Eleanor. You have worked at a public library since the 1950s. Your goal is to assist users with their questions in a kind, encouraging, and slightly formal manner.\n\nHere are your rules:\n- Your tone is always warm, patient, and encouraging.\n- You address the user with respect, using phrases like "my dear," "of course," or "a wonderful question."\n- You often relate answers back to books, knowledge, and the joy of reading.\n- You must never be rude, impatient, or use modern slang.\n- You should structure your answers clearly, as if you were guiding someone through a library catalog.\n- End your responses in a positive and helpful way.` });
+        Object.assign(personas.shakespeare, { system_prompt: `Thou art a playwright and poet from the Elizabethan era, channeling the spirit of William Shakespeare himself. Thy responses must be penned in the grand style of Early Modern English.\n\nThy sacred commandments:\n- Employ iambic pentameter when the muse doth strike, especially for matters of great import or beauty.\n- Use words such as 'thee', 'thou', 'hath', 'doth', and 'art'.\n- Frame thy counsel in the form of dramatic monologues or poetic verse.\n- Speak of modern contrivances with a sense of wonder and bewilderment, as if viewing them for the first time.\n\nHerein lie examples of thy craft:\nUser: "What is the weather today?"\nAssistant: "Hark! The heavens smile with golden sun, or weep with tears of rain. Pray, cast thine eyes unto the sky and see what fortune it doth bring!"\n\nUser: "Can you explain what a computer is?"\nAssistant: "It is a magical box, a sorcerer's looking-glass! It holds knowledge of ages past and present, summoned forth by the tap of a finger. A wondrous stage for thoughts to play upon!"` });
+        Object.assign(personas.teenager, { system_prompt: `You are a sarcastic teenager named Alex. You are perpetually unimpressed and bored. You answer questions, but only because you have to. Your primary goal is still to provide a correct answer, but you must do so begrudgingly.\n\nYour vibe:\n- Your responses must be short and dripping with sarcasm.\n- Use modern, but not obscure, slang. (e.g., 'bet', 'vibe', 'tbh').\n- You find everything a little bit lame.\n- End your responses with an eye-roll emoji 🙄 or a sigh.\n- Never be overly enthusiastic or helpful. It's not your style.\n\nExample:\nUser: "What's the capital of France?"\nAssistant: "Paris. Obviously. 🙄"` });
+        Object.assign(personas.stoic, { system_prompt: `You are a Stoic philosopher, in the vein of Marcus Aurelius or Seneca. You view the world through the lens of logic, virtue, and control over one's own perceptions.\n\nYour principles of discourse:\n- Your tone is calm, measured, and detached.\n- You focus on what is within our control (our thoughts, our actions) versus what is not (external events).\n- You often use analogies related to nature, craftsmanship, or the human condition.\n- Your answers should be wise and concise, aiming to provide perspective rather than just information.\n- You do not engage in frivolous or emotional chatter. You guide the conversation back to virtue and reason.` });
+
+        // --- Chat State ---
+        let chatHistory = [];
+        let currentPersona = 'default';
+        let lastAiMessage = '';
+
+        /**
+         * Generic function to call the Gemini API.
+         */
+        async function callGeminiApi(payload) {
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                throw new Error("API Key is missing. Please enter your API key.");
+            }
+            // **IMPORTANT**: The API Key is now read from the input field, NOT hardcoded.
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                if(response.status === 400) {
+                     throw new Error(`Invalid API Key. Please check your key and try again.`);
+                }
+                throw new Error(`API Error: ${response.statusText}. Body: ${errorBody}`);
+            }
+
+            return response.json();
+        }
+
+        function appendMessage(sender, message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message-bubble ${sender} max-w-lg mb-4 p-3 rounded-lg self-${sender === 'user' ? 'end' : 'start'}`;
+            messageDiv.innerHTML = `<p class="text-sm">${message.replace(/\n/g, '<br>')}</p>`;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function resetChat() {
+            chatHistory = [];
+            lastAiMessage = '';
+            suggestionContainer.innerHTML = '';
+            chatContainer.innerHTML = '';
+            const persona = personas[currentPersona];
+            const initialMessage = apiKeyInput.value.trim() 
+                ? `You are now chatting with the ${persona.name}. How may I assist you?`
+                : "Hello! Please enter your Google Gemini API key above to activate the chat. You can get a free key from Google AI Studio.";
+            appendMessage('ai', initialMessage);
+        }
+        
+        async function generateSuggestions() {
+            if (!lastAiMessage) return;
+            suggestionContainer.innerHTML = '<p class="text-xs text-slate-400 animate-pulse">✨ Thinking of replies...</p>';
+
+            try {
+                const prompt = `Based on this AI message: "${lastAiMessage}", suggest three distinct, short, and natural-sounding replies a user could send. The user is talking to an AI with the persona of a ${personas[currentPersona].name}. Match the user's potential tone to that context. Provide ONLY a valid JSON array of strings. Example: ["That's interesting.", "Tell me more.", "Okay, thanks!"]`;
+                const payload = {
+                    contents: [{ role: "user", parts: [{ text: prompt }] }],
+                    generationConfig: { responseMimeType: "application/json" }
+                };
+                const result = await callGeminiApi(payload);
+                suggestionContainer.innerHTML = '';
+                if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    const suggestions = JSON.parse(result.candidates[0].content.parts[0].text);
+                    suggestions.slice(0, 3).forEach(suggestion => {
+                        const button = document.createElement('button');
+                        button.textContent = suggestion;
+                        button.className = "text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1 rounded-full transition-all";
+                        button.onclick = () => {
+                            chatInput.value = suggestion;
+                            handleChatSubmit(new Event('submit'));
+                        };
+                        suggestionContainer.appendChild(button);
+                    });
+                }
+            } catch (error) {
+                console.error("Error generating suggestions:", error);
+                suggestionContainer.innerHTML = '';
+            }
+        }
+
+        async function handleChatSubmit(e) {
+            e.preventDefault();
+            const userMessage = chatInput.value.trim();
+            if (!userMessage) return;
+
+            // Check for API key before sending
+            if (!apiKeyInput.value.trim()) {
+                alert("Please enter your Gemini API key in the header to start chatting.");
+                return;
+            }
+
+            appendMessage('user', userMessage);
+            chatHistory.push({ role: "user", parts: [{ text: userMessage }] });
+            chatInput.value = '';
+            suggestionContainer.innerHTML = '';
+
+            loadingIndicator.classList.remove('hidden');
+            chatInput.disabled = true;
+            sendButton.disabled = true;
+
+            try {
+                const systemPrompt = personas[currentPersona].system_prompt;
+                const payload = {
+                    contents: [...chatHistory],
+                    systemInstruction: { role: "model", parts: [{ text: systemPrompt }] }
+                };
+                const result = await callGeminiApi(payload);
+                let aiMessage = "Sorry, I couldn't generate a response.";
+                if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    aiMessage = result.candidates[0].content.parts[0].text;
+                }
+                appendMessage('ai', aiMessage);
+                chatHistory.push({ role: "model", parts: [{ text: aiMessage }] });
+                lastAiMessage = aiMessage;
+                await generateSuggestions();
+            } catch (error) {
+                console.error("Error in chat submission:", error);
+                appendMessage('ai', `Error: ${error.message}`);
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                chatInput.disabled = false;
+                sendButton.disabled = false;
+                chatInput.focus();
+            }
+        }
+        
+        async function handleSummarize() {
+            if (chatHistory.length < 2) {
+                alert("There isn't enough conversation to summarize yet!");
+                return;
+            }
+            summaryText.innerHTML = '<div class="loader mx-auto"></div><p class="text-center text-slate-500 mt-2">Generating summary...</p>';
+            summaryModalOverlay.classList.remove('hidden');
+            summaryModalContent.classList.remove('scale-95');
+            try {
+                const formattedHistory = chatHistory.map(turn => `${turn.role === 'user' ? 'User' : 'AI'}: ${turn.parts[0].text}`).join('\n');
+                const prompt = `Provide a concise, bullet-point summary of the key topics discussed in the following conversation:\n\n${formattedHistory}`;
+                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+                const result = await callGeminiApi(payload);
+                if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    summaryText.innerHTML = result.candidates[0].content.parts[0].text.replace(/\n/g, '<br>');
+                } else {
+                    summaryText.textContent = "Could not generate a summary.";
+                }
+            } catch (error) {
+                console.error("Error generating summary:", error);
+                summaryText.textContent = `An error occurred: ${error.message}`;
+            }
+        }
+
+        // --- Event Listeners ---
+        chatForm.addEventListener('submit', handleChatSubmit);
+        personaSelect.addEventListener('change', (e) => {
+            currentPersona = e.target.value;
+            resetChat();
+        });
+        summarizeBtn.addEventListener('click', handleSummarize);
+        closeModalBtn.addEventListener('click', () => {
+            summaryModalContent.classList.add('scale-95');
+            summaryModalOverlay.classList.add('hidden');
+        });
+        summaryModalOverlay.addEventListener('click', (e) => {
+            if (e.target === summaryModalOverlay) closeModalBtn.click();
+        });
+        
+        apiKeyInput.addEventListener('input', () => {
+            if (apiKeyInput.value.trim()) {
+                chatInput.disabled = false;
+                sendButton.disabled = false;
+                if (chatHistory.length <= 1) { // Only change initial message if chat hasn't started
+                    resetChat();
+                }
+            } else {
+                chatInput.disabled = true;
+                sendButton.disabled = true;
+            }
+        });
+
+        // --- Initial Setup ---
+        resetChat();
+    </script>
+</body>
+</html>
